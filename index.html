@@ -43,13 +43,13 @@
   <div id="start">
     <div class="card">
       <div class="title">Zombie Rush｜丧尸突袭</div>
-      <div class="subtitle">第一人称丧尸射击 · H5 版本（更亮）<br>桌面：<b>Play</b> → 点击画面进入鼠标锁定；移动端有虚拟摇杆与按钮。</div>
+      <div class="subtitle">第一人称丧尸射击 · H5 版本（提亮版）<br>桌面：<b>Play</b> → 点击画面进入鼠标锁定；移动端有虚拟摇杆与按钮。</div>
       <div class="row">
         <button id="btnPlay" class="btn">Play</button>
-        <label class="small">Brightness <input id="brightness" type="range" min="0.6" max="2.0" step="0.05" value="1.25"></label>
-        <label class="small">Sensitivity <input id="sens" type="range" min="0.2" max="2.0" step="0.05" value="1.0"></label>
+        <label class="small">亮度 <input id="brightness" type="range" min="0.6" max="2.0" step="0.05" value="1.25"></label>
+        <label class="small">灵敏度 <input id="sens" type="range" min="0.2" max="2.0" step="0.05" value="1.0"></label>
       </div>
-      <div class="small">WASD 移动 · 鼠标左键射击 · R 换弹 · 1/2/3 切枪 · ESC 暂停</div>
+      <div class="small">WASD 移动（已修正） · 鼠标左键射击 · R 换弹 · 1/2/3 切枪 · F 手电筒 · ESC 暂停</div>
     </div>
   </div>
 
@@ -57,12 +57,13 @@
     <div id="hud">
       <div style="display:flex; align-items:center; gap:10px;">
         <div id="healthBar"><div id="healthFill"></div></div>
-        <div class="pill" id="ammo">Ammo 12/60</div>
-        <div class="pill" id="weapon">Pistol</div>
+        <div class="pill" id="ammo">子弹 12/60</div>
+        <div class="pill" id="weapon">手枪</div>
+        <div class="pill" id="flashStatus">手电：开</div>
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
-        <div class="pill" id="wave">Wave 1</div>
-        <div class="pill" id="score">Score 0</div>
+        <div class="pill" id="wave">波次 1</div>
+        <div class="pill" id="score">得分 0</div>
       </div>
     </div>
     <div id="crosshair"></div>
@@ -71,9 +72,9 @@
 
   <div id="pause">
     <div class="card">
-      <div class="title">暂停 / Pause</div>
-      <div class="row small">按 ESC 返回游戏 · ESC to resume</div>
-      <div class="row small">鼠标灵敏度 <input id="sens2" type="range" min="0.2" max="2.0" step="0.05" value="1.0"></div>
+      <div class="title">暂停</div>
+      <div class="row small">按 ESC 返回游戏</div>
+      <div class="row small">灵敏度 <input id="sens2" type="range" min="0.2" max="2.0" step="0.05" value="1.0"></div>
       <div class="row"><button id="btnResume" class="btn">继续</button> <button id="btnRestart" class="btn" style="background:#334155">重开</button></div>
     </div>
   </div>
@@ -109,18 +110,17 @@
     camera.position.set(0, 1.65, 5);
     camera.rotation.order = 'YXZ';
 
-    // === Brighter lighting setup ===
+    // === Lighting ===
     const amb = new THREE.AmbientLight(0xffffff, 0.35); scene.add(amb);
     const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x1c1f24, 0.9); scene.add(hemi);
     const dir = new THREE.DirectionalLight(0xfff2cc, 0.65); dir.position.set(8,12,6); scene.add(dir);
 
-    // Player-attached headlamp
+    // Flashlight (toggle with F)
     const headLamp = new THREE.SpotLight(0xffffff, 1.25, 32, Math.PI/6, 0.25, 1.0);
     headLamp.position.set(0,0,0);
     headLamp.target.position.set(0,0,-1);
-    camera.add(headLamp);
-    camera.add(headLamp.target);
-    scene.add(camera);
+    let flashlightOn = true;
+    camera.add(headLamp); camera.add(headLamp.target); scene.add(camera);
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(220,220), new THREE.MeshStandardMaterial({ color:0x222831, roughness:.9 }));
     ground.rotation.x = -Math.PI/2; scene.add(ground);
@@ -133,18 +133,13 @@
       scene.add(m);
     }
 
-    // Lamps (brighter baseline)
-    const lamps=[];
-    for(let i=0;i<14;i++){
-      const p=new THREE.Vector3((Math.random()-0.5)*140, 4.0, (Math.random()-0.5)*140);
-      const s=new THREE.PointLight(0xffc088, 0.9, 22, 2.0); s.position.copy(p); scene.add(s); lamps.push(s);
-    }
+    const lamps=[]; for(let i=0;i<14;i++){ const p=new THREE.Vector3((Math.random()-0.5)*140, 4.0, (Math.random()-0.5)*140); const s=new THREE.PointLight(0xffc088, 0.9, 22, 2.0); s.position.copy(p); scene.add(s); lamps.push(s); }
 
     // Player & input
     const player = { pos:new THREE.Vector3(0,1.65,0), speed:4.2, sprint:6.0 };
     const keys = {};
 
-    // === Simple visible gun model (attached to camera) ===
+    // Gun model
     const gun = new THREE.Group();
     (function buildGun(){
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.38,0.18,0.8), new THREE.MeshStandardMaterial({ color:0x3b3f46, metalness:.2, roughness:.6 }));
@@ -157,9 +152,9 @@
       gun.position.set(0.32, -0.15, -0.2);
       camera.add(gun);
     })();
-    let recoilT=0; // recoil timer for animation
+    let recoilT=0;
 
-    // UI elements
+    // UI
     const elStart = document.getElementById('start');
     const elBtnPlay = document.getElementById('btnPlay');
     const elPause = document.getElementById('pause');
@@ -174,6 +169,7 @@
     const elScore = document.getElementById('score');
     const elHealthFill = document.getElementById('healthFill');
     const elHit = document.getElementById('hitflash');
+    const elFlashStatus = document.getElementById('flashStatus');
 
     // Mobile controls
     const mc = { move:{x:0,y:0}, firing:false };
@@ -188,15 +184,15 @@
 
     // Weapons
     const weapons = {
-      pistol:{ name:'Pistol', damage:20, fireRate:5, magSize:12, reload:1.1, spread:0.003, recoil:0.006, range:80 },
-      shotgun:{ name:'Shotgun', damage:12, pellets:6, fireRate:1.1, magSize:6, reload:1.6, spread:0.02, recoil:0.01, range:35 },
-      ar:{ name:'AR', damage:16, fireRate:10, magSize:30, reload:1.8, spread:0.003, recoil:0.003, range:90 }
+      pistol:{ name:'手枪', damage:20, fireRate:5, magSize:12, reload:1.1, spread:0.003, recoil:0.006, range:80 },
+      shotgun:{ name:'霰弹枪', damage:12, pellets:6, fireRate:1.1, magSize:6, reload:1.6, spread:0.02, recoil:0.01, range:35 },
+      ar:{ name:'突击步枪', damage:16, fireRate:10, magSize:30, reload:1.8, spread:0.003, recoil:0.003, range:90 }
     };
     let currentWeapon = 'pistol';
     let ammo = { pistol:{mag:12,reserve:60}, shotgun:{mag:0,reserve:0}, ar:{mag:0,reserve:0} };
     let nextShotTime = 0;
 
-    function updateAmmoUI(){ const w=weapons[currentWeapon]; elAmmo.textContent=`Ammo ${ammo[currentWeapon].mag}/${ammo[currentWeapon].reserve}`; elWeapon.textContent=w.name; }
+    function updateAmmoUI(){ const w=weapons[currentWeapon]; elAmmo.textContent=`子弹 ${ammo[currentWeapon].mag}/${ammo[currentWeapon].reserve}`; elWeapon.textContent=w.name; }
     updateAmmoUI();
 
     // Audio
@@ -205,7 +201,7 @@
     function beep(f=400,d=0.05,v=0.2){ if(!audioCtx) return; const o=audioCtx.createOscillator(); const g=audioCtx.createGain(); o.type='square'; o.frequency.value=f; g.gain.value=v; o.connect(g).connect(mixer.master); o.start(); o.stop(audioCtx.currentTime+d);} 
     function sfxShot(){ beep(200,0.05,0.28);} function sfxReload(){beep(320,0.08,0.2);} function sfxHit(){beep(520,0.03,0.25);} function sfxHurt(){beep(120,0.08,0.25);} function sfxDead(){beep(60,0.25,0.3);} function sfxEmpty(){beep(260,0.05,0.18);} 
 
-    // Zombies (更显眼的配色)
+    // Zombies (显眼配色)
     const zombieGeo = new THREE.BoxGeometry(0.9,1.6,0.5);
     const matWalker = new THREE.MeshStandardMaterial({ color:0x7fbf7f, roughness:.85 });
     const matRunner = new THREE.MeshStandardMaterial({ color:0xff7f7f, roughness:.85 });
@@ -222,9 +218,9 @@
     }
     function randomSpawnPos(){ const ang=Math.random()*Math.PI*2; const r=28+Math.random()*30; return new THREE.Vector3(Math.cos(ang)*r, 0.8, Math.sin(ang)*r); }
 
-    function startWave(){ elWave.textContent=`Wave ${state.wave}`; const count=6+Math.floor(state.wave*1.8); for(let i=0;i<count;i++){ const t=Math.random(); const type=t>0.85?'brute': t>0.55?'runner':'walker'; spawnZombie(type, randomSpawnPos()); } }
+    function startWave(){ elWave.textContent=`波次 ${state.wave}`; const count=6+Math.floor(state.wave*1.8); for(let i=0;i<count;i++){ const t=Math.random(); const type=t>0.85?'brute': t>0.55?'runner':'walker'; spawnZombie(type, randomSpawnPos()); } }
 
-    // Muzzle flash (sprite)
+    // Muzzle flash
     const flashTex = new THREE.CanvasTexture((()=>{ const c=document.createElement('canvas'); c.width=c.height=64; const g=c.getContext('2d'); g.fillStyle='#fff'; g.beginPath(); g.arc(32,32,26,0,Math.PI*2); g.fill(); return c; })());
     const flashMat = new THREE.SpriteMaterial({ map:flashTex, color:0xfff3a0, transparent:true, opacity:0.9 });
 
@@ -232,10 +228,7 @@
     function shoot(){
       const now=state.time; const w=weapons[currentWeapon]; if(now<nextShotTime) return; if(ammo[currentWeapon].mag<=0){ sfxEmpty(); return; }
       nextShotTime = now + (1.0/w.fireRate); ammo[currentWeapon].mag--; updateAmmoUI(); sfxShot();
-      // recoil anim
-      recoilT = 0.09;
-      gun.position.z -= 0.05; gun.rotation.x -= 0.05;
-      // flash
+      recoilT = 0.09; gun.position.z -= 0.05; gun.rotation.x -= 0.05;
       const flash = new THREE.Sprite(flashMat); flash.scale.set(0.2,0.2,0.2); flash.position.set(0.09,-0.17,-1.05); camera.add(flash); setTimeout(()=>{ camera.remove(flash); }, 50);
 
       const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
@@ -251,10 +244,10 @@
 
     function reload(){ const w=weapons[currentWeapon]; const a=ammo[currentWeapon]; const need=w.magSize-a.mag; if(need<=0||a.reserve<=0) return; const take=Math.min(need,a.reserve); a.mag+=take; a.reserve-=take; updateAmmoUI(); sfxReload(); }
     function switchWeapon(){ currentWeapon = currentWeapon==='pistol' ? (ammo.ar.mag>0||ammo.ar.reserve>0?'ar':'shotgun') : currentWeapon==='ar' ? (ammo.shotgun.mag>0||ammo.shotgun.reserve>0?'shotgun':'pistol') : 'pistol'; updateAmmoUI(); }
-    function addScore(v){ state.score+=v; elScore.textContent=`Score ${state.score}`; }
+    function addScore(v){ state.score+=v; elScore.textContent=`得分 ${state.score}`; }
 
     function damagePlayer(v){ state.health=Math.max(0, state.health-v); elHealthFill.style.width=`${state.health}%`; elHit.style.opacity=0.9; setTimeout(()=>{ elHit.style.opacity=0; }, 60); sfxHurt(); if(state.health<=0) gameOver(); }
-    function gameOver(){ state.running=false; state.paused=true; showPause(`你已阵亡\nScore ${state.score} · Wave ${state.wave}`); sfxDead(); }
+    function gameOver(){ state.running=false; state.paused=true; showPause(`你已阵亡\n得分 ${state.score} · 波次 ${state.wave}`); sfxDead(); }
 
     // Pointer lock (custom)
     const controls={ get locked(){ return document.pointerLockElement===renderer.domElement; }, lock(){ renderer.domElement.requestPointerLock(); }, unlock(){ if(document.pointerLockElement) document.exitPointerLock(); } };
@@ -262,7 +255,13 @@
     document.addEventListener('mousemove', onMouseMove);
 
     // Keyboard
-    window.addEventListener('keydown', (e)=>{ keys[e.code]=true; if(e.code==='KeyR') reload(); if(e.code==='Digit1'||e.code==='Digit2'||e.code==='Digit3') switchWeapon(); if(e.code==='Escape') togglePause(); });
+    window.addEventListener('keydown', (e)=>{
+      keys[e.code]=true;
+      if(e.code==='KeyR') reload();
+      if(e.code==='Digit1'||e.code==='Digit2'||e.code==='Digit3') switchWeapon();
+      if(e.code==='KeyF'){ flashlightOn=!flashlightOn; headLamp.visible=flashlightOn; elFlashStatus.textContent = `手电：${flashlightOn?'开':'关'}`; }
+      if(e.code==='Escape') togglePause();
+    });
     window.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
     renderer.domElement.addEventListener('mousedown', ()=>{ if(!state.running) return; if(!state.paused) shoot(); });
 
@@ -282,21 +281,35 @@
     function setupStick(){ let touching=false; let center={x:0,y:0}; elStick.addEventListener('touchstart',(e)=>{ touching=true; const r=elStick.getBoundingClientRect(); center={x:r.left+r.width/2,y:r.top+r.height/2}; elNub.style.transform='translate(0,0)'; mc.move={x:0,y:0}; }); elStick.addEventListener('touchmove',(e)=>{ if(!touching)return; const t=e.changedTouches[0]; let dx=t.clientX-center.x, dy=t.clientY-center.y; const max=60; const len=Math.hypot(dx,dy); if(len>max){ dx=dx/len*max; dy=dy/len*max; } elNub.style.transform=`translate(${dx}px,${dy}px)`; mc.move={x:dx/max,y:dy/max}; }); const end=()=>{ touching=false; mc.move={x:0,y:0}; elNub.style.transform='translate(0,0)'; }; elStick.addEventListener('touchend',end); elStick.addEventListener('touchcancel',end); elBtnFire.addEventListener('touchstart',()=>{ mc.firing=true; }); elBtnFire.addEventListener('touchend',()=>{ mc.firing=false; }); elBtnReload.addEventListener('touchstart',()=> reload()); elBtnSwitch.addEventListener('touchstart',()=> switchWeapon()); elBtnGrenade.addEventListener('touchstart',()=>{/* todo */}); }
     if(state.isMobile) setupStick();
 
-    function startGame(){ state.running=true; state.paused=false; state.score=0; state.wave=1; state.health=100; document.getElementById('healthFill').style.width='100%'; elScore.textContent='Score 0'; elWave.textContent='Wave 1'; elStart.style.display='none'; hidePause(); controls.lock(); document.addEventListener('click', ()=>{ if(!audioCtx) initAudio(); }, { once:true }); startWave(); animate(0); }
+    function startGame(){ state.running=true; state.paused=false; state.score=0; state.wave=1; state.health=100; document.getElementById('healthFill').style.width='100%'; elScore.textContent='得分 0'; elWave.textContent='波次 1'; elFlashStatus.textContent='手电：开'; headLamp.visible=true; flashlightOn=true; elStart.style.display='none'; hidePause(); controls.lock(); document.addEventListener('click', ()=>{ if(!audioCtx) initAudio(); }, { once:true }); startWave(); animate(0); }
 
-    function getMoveVec(){ let x=0,z=0; if(state.isMobile){ x=mc.move.x; z=mc.move.y; } else { if(keys['KeyW']) z-=1; if(keys['KeyS']) z+=1; if(keys['KeyA']) x-=1; if(keys['KeyD']) x+=1; } const v=new THREE.Vector3(x,0,z); if(v.lengthSq()>0) v.normalize(); return v; }
+    function getMoveVec(){
+      let x=0,z=0;
+      if(state.isMobile){
+        x = mc.move.x;
+        z = -mc.move.y; // 上推=前进
+      } else {
+        if(keys['KeyW']) z += 1; // 修正：W 前进
+        if(keys['KeyS']) z -= 1; // 修正：S 后退
+        if(keys['KeyA']) x += 1; // A 左
+        if(keys['KeyD']) x -= 1; // D 右
+      }
+      const v=new THREE.Vector3(x,0,z); if(v.lengthSq()>0) v.normalize(); return v;
+    }
 
     let last=performance.now();
     function animate(t){ const dt=Math.min(0.033,(t-last)/1000); last=t; state.time+=dt; if(state.running&&!state.paused){ for(const L of lamps){ L.intensity=0.6+Math.random()*0.4; }
-      const mv=getMoveVec(); const up=new THREE.Vector3(0,1,0); const forward=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize(); const right=new THREE.Vector3().crossVectors(forward,up).multiplyScalar(-1); const speed=(keys['ShiftLeft']||state.isMobile&&Math.abs(mc.move.x)+Math.abs(mc.move.y)>1.2)?player.sprint:player.speed; player.pos.addScaledVector(forward,mv.z*speed*dt); player.pos.addScaledVector(right,mv.x*speed*dt); player.pos.x=THREE.MathUtils.clamp(player.pos.x,-105,105); player.pos.z=THREE.MathUtils.clamp(player.pos.z,-105,105); camera.position.copy(player.pos);
+      const mv=getMoveVec(); const up=new THREE.Vector3(0,1,0); const forward=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize(); const right=new THREE.Vector3().crossVectors(up, forward).normalize();
+      const speed=(keys['ShiftLeft']||state.isMobile&&Math.abs(mc.move.x)+Math.abs(mc.move.y)>1.2)?player.sprint:player.speed;
+      player.pos.addScaledVector(forward, mv.z*speed*dt);
+      player.pos.addScaledVector(right,   mv.x*speed*dt);
+      player.pos.x=THREE.MathUtils.clamp(player.pos.x,-105,105); player.pos.z=THREE.MathUtils.clamp(player.pos.z,-105,105); camera.position.copy(player.pos);
       if(state.isMobile&&mc.firing){ shoot(); }
-      // gun recoil return
       if(recoilT>0){ recoilT-=dt; gun.position.z=Math.min(gun.position.z+dt*0.6, 0.32-0.15); gun.rotation.x=Math.min(gun.rotation.x+dt*0.6, 0); }
       for(const z of Array.from(zombies)){ tmpVec.copy(player.pos).sub(z.mesh.position); tmpVec.y=0; const dist=tmpVec.length(); if(dist>0.0001){ tmpVec.normalize(); z.mesh.position.addScaledVector(tmpVec, z.speed*dt); } z.mesh.position.y=0.8+Math.sin(state.time*6)*0.02; if(dist<1.2 && state.time>z.nextAttack){ z.nextAttack=state.time+0.8+Math.random()*0.6; damagePlayer(z.dmg); } }
-      if(zombies.size===0){ state.wave++; addScore(25); startWave(); } elWave.textContent=`Wave ${state.wave}`; }
+      if(zombies.size===0){ state.wave++; addScore(25); startWave(); } elWave.textContent=`波次 ${state.wave}`; }
       renderer.render(scene,camera); requestAnimationFrame(animate); }
 
-    // Resize
     window.addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
   </script>
 </body>
