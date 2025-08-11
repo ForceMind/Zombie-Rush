@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Zombie Rush｜丧尸突袭 - HTML5 FPS (Three.js)</title>
+  <title>Zombie Rush｜丧尸突袭 - HTML5 FPS</title>
   <style>
     html, body { margin:0; padding:0; height:100%; background:#0b0d10; font-family:system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
     #ui, #start, #pause { position:fixed; inset:0; pointer-events:none; }
@@ -87,11 +87,16 @@
     <div id="btnGrenade" class="mBtn small">G</div>
   </div>
 
-  <!-- Three.js from CDN (ESM) -->
-  <script type="module">
-    import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
-    import { PointerLockControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/PointerLockControls.js';
+  <!-- Load THREE as classic UMD to avoid module resolver issues in sandbox -->
+  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
 
+  <script>
+  // --- Basic self-tests ("test cases") to ensure runtime is sane ---
+  console.assert(typeof window.THREE !== 'undefined', 'TEST: THREE should be loaded globally');
+  console.assert(!!document.body, 'TEST: DOM should be ready');
+  </script>
+
+  <script>
     // ---------- Global/game state ----------
     const state = {
       running:false,
@@ -100,9 +105,12 @@
       wave:1,
       health:100,
       time:0,
-      move:{f:0,b:0,l:0,r:0,sprint:false},
       isMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
     };
+
+    // Mouse look (custom pointer lock, replaces PointerLockControls)
+    let lookSensitivity = 1.0; // updated by sliders
+    let yaw = 0, pitch = 0; // radians, camera yaw/pitch
 
     // ---------- Renderer & Scene ----------
     const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -116,6 +124,7 @@
 
     const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 200);
     camera.position.set(0, 1.65, 5);
+    camera.rotation.order = 'YXZ';
 
     const hemi = new THREE.HemisphereLight(0x556677, 0x111111, 0.9);
     scene.add(hemi);
@@ -150,11 +159,9 @@
       const s = new THREE.PointLight(0xffaa66, 0.6, 16, 2.0); s.position.copy(p); scene.add(s); lamps.push(s);
     }
 
-    // Controls
-    const controls = new PointerLockControls(camera, renderer.domElement);
-
-    // Player collider (capsule-ish using y only)
-    const player = { pos:new THREE.Vector3(0,1.65,0), vel:new THREE.Vector3(), onGround:true, speed:4.2, sprint:6.0 };
+    // Player collider & movement
+    const player = { pos:new THREE.Vector3(0,1.65,0), speed:4.2, sprint:6.0 };
+    const keys = {};
 
     // UI elements
     const elStart = document.getElementById('start');
@@ -172,16 +179,14 @@
     const elHit = document.getElementById('hitflash');
 
     // Mobile controls setup
-    const mc = { active:false, move:{x:0,y:0}, firing:false };
+    const mc = { move:{x:0,y:0}, firing:false };
     const elMobile = document.getElementById('mobileControls');
     const elStick = document.getElementById('stickLeft');
     const elNub = document.getElementById('stickNub');
-
     const elBtnFire = document.getElementById('btnFire');
     const elBtnReload = document.getElementById('btnReload');
     const elBtnSwitch = document.getElementById('btnSwitch');
     const elBtnGrenade = document.getElementById('btnGrenade');
-
     if(state.isMobile){ elMobile.style.display='block'; }
 
     // Weapons
@@ -216,25 +221,23 @@
       if(!audioCtx) return; const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
       o.type='square'; o.frequency.value=freq; g.gain.value=vol; o.connect(g).connect(mixer.master); o.start(); o.stop(audioCtx.currentTime+dur);
     }
-
     function sfxShot(){ beep(180, 0.05, 0.3); }
     function sfxReload(){ beep(320, 0.08, 0.2); }
     function sfxHit(){ beep(520, 0.03, 0.25); }
     function sfxHurt(){ beep(120, 0.08, 0.25); }
     function sfxDead(){ beep(60, 0.25, 0.3); }
+    function sfxEmpty(){ beep(260, 0.05, 0.18); }
 
     // Zombies
     const zombieGeo = new THREE.BoxGeometry(0.9,1.6,0.5);
     const matWalker = new THREE.MeshStandardMaterial({ color:0x4b5d49, roughness:.9 });
     const matRunner = new THREE.MeshStandardMaterial({ color:0x6b2f2f, roughness:.9 });
     const matBrute  = new THREE.MeshStandardMaterial({ color:0x374151, roughness:.8, metalness:.2 });
-
     const zombies = new Set();
     const tmpVec = new THREE.Vector3();
 
     function spawnZombie(type, pos){
       const mesh = new THREE.Mesh(zombieGeo, type==='runner'?matRunner: type==='brute'?matBrute:matWalker);
-      mesh.castShadow = false; mesh.receiveShadow=false;
       mesh.position.copy(pos);
       scene.add(mesh);
       const z = {
@@ -248,14 +251,12 @@
       zombies.add(z);
       return z;
     }
-
     function randomSpawnPos(){
       const ang = Math.random()*Math.PI*2; const r = 35 + Math.random()*25;
       return new THREE.Vector3(Math.cos(ang)*r, 0.8, Math.sin(ang)*r);
     }
 
     // Wave system
-    let waveTimer = 0; // inter-wave countdown when <=0 spawn next wave
     function startWave(){
       elWave.textContent = `Wave ${state.wave}`;
       const count = 6 + Math.floor(state.wave*1.8);
@@ -278,7 +279,7 @@
       sfxShot();
 
       // Simulate spread by jittering direction
-      const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+      const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
       dir.x += (Math.random()-0.5)*w.spread; dir.y += (Math.random()-0.5)*w.spread; dir.z += (Math.random()-0.5)*w.spread; dir.normalize();
 
       raycaster.set(camera.position.clone(), dir);
@@ -296,14 +297,11 @@
           if(z.hp<=0){
             zombies.delete(z); scene.remove(z.mesh);
             addScore(z.type==='brute'? 30 : z.type==='runner'? 20 : 10);
-            // chance to drop small ammo
             if(Math.random()<0.15){ ammo.pistol.reserve += 12; updateAmmoUI(); }
           }
         }
       }
     }
-
-    function sfxEmpty(){ beep(260, 0.05, 0.18); }
 
     function reload(){
       const w = weapons[currentWeapon];
@@ -313,12 +311,10 @@
       const take = Math.min(need, a.reserve);
       a.mag += take; a.reserve -= take; updateAmmoUI(); sfxReload();
     }
-
     function switchWeapon(){
       currentWeapon = currentWeapon==='pistol' ? (ammo.ar.mag>0||ammo.ar.reserve>0?'ar':'shotgun') : currentWeapon==='ar' ? (ammo.shotgun.mag>0||ammo.shotgun.reserve>0?'shotgun':'pistol') : 'pistol';
       updateAmmoUI();
     }
-
     function addScore(v){ state.score += v; elScore.textContent = `Score ${state.score}`; }
 
     // Damage and game over
@@ -329,14 +325,31 @@
       sfxHurt();
       if(state.health<=0){ gameOver(); }
     }
-
     function gameOver(){
       state.running=false; state.paused=true; showPause(`你已阵亡\nScore ${state.score} · Wave ${state.wave}`);
       sfxDead();
     }
 
-    // Input (desktop)
-    const keys = {};
+    // ---- Custom Pointer Lock controls ----
+    const controls = {
+      get locked(){ return document.pointerLockElement === renderer.domElement; },
+      lock(){ renderer.domElement.requestPointerLock(); },
+      unlock(){ if(document.pointerLockElement) document.exitPointerLock(); }
+    };
+    function onMouseMove(e){
+      if(!controls.locked || state.paused || !state.running) return;
+      const scale = parseFloat(elSens.value || '1');
+      yaw -= (e.movementX||0) * 0.002 * scale * lookSensitivity;
+      pitch -= (e.movementY||0) * 0.002 * scale * lookSensitivity;
+      // Clamp pitch to avoid flip
+      const limit = Math.PI/2 - 0.01;
+      if(pitch >  limit) pitch =  limit;
+      if(pitch < -limit) pitch = -limit;
+      camera.rotation.set(pitch, yaw, 0, 'YXZ');
+    }
+    document.addEventListener('mousemove', onMouseMove);
+
+    // Keyboard
     window.addEventListener('keydown', (e)=>{
       keys[e.code]=true;
       if(e.code==='KeyR') reload();
@@ -345,6 +358,8 @@
       if(e.code==='Escape') togglePause();
     });
     window.addEventListener('keyup', (e)=>{ keys[e.code]=false; });
+
+    // Click to shoot
     renderer.domElement.addEventListener('mousedown', ()=>{ if(!state.running) return; if(!state.paused) shoot(); });
 
     function togglePause(){
@@ -353,7 +368,6 @@
       if(state.paused){ showPause(); controls.unlock(); }
       else { hidePause(); controls.lock(); }
     }
-
     function showPause(msg){
       elPause.style.display='flex';
       elPause.querySelector('.subtitle')?.remove();
@@ -362,20 +376,17 @@
     function hidePause(){ elPause.style.display='none'; }
 
     // Start
-    elBtnPlay.addEventListener('click', ()=>{
-      initAudio();
-      startGame();
-    });
+    elBtnPlay.addEventListener('click', ()=>{ initAudio(); startGame(); });
     elBtnResume.addEventListener('click', ()=> togglePause());
     elBtnRestart.addEventListener('click', ()=> { location.reload(); });
-    elSens.addEventListener('input', ()=>{ controls.lookSpeed = parseFloat(elSens.value); elSens2.value = elSens.value; });
-    elSens2.addEventListener('input', ()=>{ controls.lookSpeed = parseFloat(elSens2.value); elSens.value = elSens2.value; });
+    elSens.addEventListener('input', ()=>{ lookSensitivity = parseFloat(elSens.value); elSens2.value = elSens.value; });
+    elSens2.addEventListener('input', ()=>{ lookSensitivity = parseFloat(elSens2.value); elSens.value = elSens2.value; });
 
     // Mobile controls events
     function setupStick(){
       let touching=false; let center={x:0,y:0};
       elStick.addEventListener('touchstart', (e)=>{
-        touching=true; const t=e.changedTouches[0]; const r=elStick.getBoundingClientRect(); center={x:r.left+r.width/2, y:r.top+r.height/2};
+        touching=true; const r=elStick.getBoundingClientRect(); center={x:r.left+r.width/2, y:r.top+r.height/2};
         elNub.style.transform='translate(0,0)'; mc.move={x:0,y:0};
       });
       elStick.addEventListener('touchmove', (e)=>{
@@ -385,7 +396,6 @@
       });
       const end=()=>{ touching=false; mc.move={x:0,y:0}; elNub.style.transform='translate(0,0)'; };
       elStick.addEventListener('touchend', end); elStick.addEventListener('touchcancel', end);
-
       elBtnFire.addEventListener('touchstart', ()=>{ mc.firing=true; });
       elBtnFire.addEventListener('touchend', ()=>{ mc.firing=false; });
       elBtnReload.addEventListener('touchstart', ()=> reload());
@@ -400,22 +410,17 @@
       elScore.textContent='Score 0'; elWave.textContent='Wave 1';
       elStart.style.display='none'; hidePause();
       controls.lock();
-      // attach movement
+      // ensure audio context starts
       document.addEventListener('click', ()=>{ if(!audioCtx) initAudio(); }, { once:true });
       startWave();
       animate(0);
     }
 
-    // Movement helpers
     function getMoveVec(){
       let x=0,z=0;
       if(state.isMobile){ x = mc.move.x; z = mc.move.y; }
-      else {
-        if(keys['KeyW']) z -= 1; if(keys['KeyS']) z += 1; if(keys['KeyA']) x -= 1; if(keys['KeyD']) x += 1;
-      }
-      const v = new THREE.Vector3(x,0,z);
-      if(v.lengthSq()>0) v.normalize();
-      return v;
+      else { if(keys['KeyW']) z -= 1; if(keys['KeyS']) z += 1; if(keys['KeyA']) x -= 1; if(keys['KeyD']) x += 1; }
+      const v = new THREE.Vector3(x,0,z); if(v.lengthSq()>0) v.normalize(); return v;
     }
 
     // Main loop
@@ -423,41 +428,30 @@
     function animate(t){
       const dt = Math.min(0.033, (t-last)/1000); last=t; state.time += dt;
       if(state.running && !state.paused){
-        // Lamps flicker
         for(const L of lamps){ L.intensity = 0.4 + Math.random()*0.3; }
 
-        // Move player
         const mv = getMoveVec();
+        const up = new THREE.Vector3(0,1,0);
+        const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); forward.y=0; forward.normalize();
+        const right = new THREE.Vector3().crossVectors(forward, up).multiplyScalar(-1);
         const speed = (keys['ShiftLeft']||state.isMobile&&Math.abs(mc.move.x)+Math.abs(mc.move.y)>1.2) ? player.sprint : player.speed;
-        // Move in camera space (XZ)
-        const forward = new THREE.Vector3(); camera.getWorldDirection(forward); forward.y=0; forward.normalize();
-        const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).multiplyScalar(-1);
         player.pos.addScaledVector(forward, mv.z*speed*dt);
         player.pos.addScaledVector(right,   mv.x*speed*dt);
-        // Clamp to arena
         player.pos.x = THREE.MathUtils.clamp(player.pos.x, -95, 95);
         player.pos.z = THREE.MathUtils.clamp(player.pos.z, -95, 95);
         camera.position.copy(player.pos);
 
-        // Auto-fire on mobile hold
         if(state.isMobile && mc.firing){ shoot(); }
 
         // Update zombies
         for(const z of Array.from(zombies)){
           tmpVec.copy(player.pos).sub(z.mesh.position); tmpVec.y=0; const dist = tmpVec.length();
           if(dist>0.0001){ tmpVec.normalize(); z.mesh.position.addScaledVector(tmpVec, z.speed*dt); }
-          // bob
           z.mesh.position.y = 0.8 + Math.sin(state.time*6)*0.02;
-          // attack
           if(dist<1.2 && state.time>z.nextAttack){ z.nextAttack = state.time + 0.8 + Math.random()*0.6; damagePlayer(z.dmg); }
         }
 
-        // Wave clear check
-        if(zombies.size===0){
-          state.wave++; addScore(25); startWave();
-        }
-
-        // HUD
+        if(zombies.size===0){ state.wave++; addScore(25); startWave(); }
         elWave.textContent = `Wave ${state.wave}`;
       }
 
@@ -470,28 +464,6 @@
       camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
     });
-
-    // Pointer lock hooks for controls
-    controls.addEventListener('lock', ()=>{ /* no-op */ });
-    controls.addEventListener('unlock', ()=>{ /* show cursor when unlocked */ });
-
-    // Apply sensitivity (we emulate via movement of camera rotation speed using internal pointer deltas)
-    // PointerLockControls in three r159 lacks direct lookSpeed; we scale movement by overriding onMouseMove
-    const origOnMouseMove = controls.onMouseMove.bind(controls);
-    controls.onMouseMove = function(event){
-      const scale = parseFloat(elSens.value || '1');
-      // Fake event movement scaling
-      const e = { movementX: (event.movementX||0)*scale, movementY:(event.movementY||0)*scale };
-      // Patch internals
-      const saved = { movementX: event.movementX, movementY:event.movementY };
-      event.movementX = e.movementX; event.movementY = e.movementY;
-      origOnMouseMove(event);
-      event.movementX = saved.movementX; event.movementY = saved.movementY;
-    };
-
-    // Attach controls
-    scene.add(controls.getObject());
-
   </script>
 </body>
 </html>
