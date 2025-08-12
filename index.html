@@ -394,7 +394,7 @@
     function getMoveVec(){
       let x=0,z=0;
       if(state.isMobile){ x=mc.move.x; z=-mc.move.y; } // 上推前进
-      else { if(keys['KeyW']) z+=1; if(keys['KeyS']) z-=1; if(keys['KeyA']) x-=1; if(keys['KeyD']) x+=1; }
+      else { if(keys['KeyW']) z+=1; if(keys['KeyS']) z-=1; if(keys['KeyA']) x+=1; if(keys['KeyD']) x-=1; }
       const v=new THREE.Vector3(x,0,z); if(v.lengthSq()>0) v.normalize(); return v;
     }
 
